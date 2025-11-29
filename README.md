@@ -6,6 +6,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/)
 
+## Repository
+
+- **GitHub**: [BerjisTech/kra-connect-node-sdk](https://github.com/BerjisTech/kra-connect-node-sdk)
+- **NPM**: [@kra-connect/node](https://www.npmjs.com/package/@kra-connect/node)
+- **Documentation**: [https://docs.kra-connect.dev/node](https://docs.kra-connect.dev/node)
+
 ## Features
 
 - ✅ **Full TypeScript Support** - Complete type definitions
@@ -375,20 +381,55 @@ npm run format
 npm run typecheck
 ```
 
+## Publishing
+
+### Publishing to NPM
+
+```bash
+# Update version in package.json
+npm version patch  # or minor, or major
+
+# Update CHANGELOG.md
+
+# Build the package
+npm run build
+
+# Publish to NPM
+npm publish --access public
+
+# Or publish beta version
+npm publish --tag beta
+```
+
+### GitHub Release
+
+```bash
+# Tag the release
+git tag -a v1.0.0 -m "Release version 1.0.0"
+git push origin v1.0.0
+
+# Create GitHub release
+gh release create v1.0.0 --title "v1.0.0" --notes "Release notes here"
+```
+
 ## Contributing
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.
+Contributions are welcome! Please:
+
+1. Fork the repository: [BerjisTech/kra-connect-node-sdk](https://github.com/BerjisTech/kra-connect-node-sdk)
+2. Create a feature branch
+3. Make your changes with tests
+4. Submit a pull request
 
 ## License
 
-MIT License - see [LICENSE](../../LICENSE) for details.
+MIT License - see [LICENSE](./LICENSE) for details.
 
 ## Support
 
 - **Documentation**: [https://docs.kra-connect.dev/node](https://docs.kra-connect.dev/node)
-- **Issues**: [GitHub Issues](https://github.com/your-org/kra-connect/issues)
-- **Discord**: [Join our community](https://discord.gg/kra-connect)
-- **Email**: support@kra-connect.dev
+- **Issues**: [GitHub Issues](https://github.com/BerjisTech/kra-connect-node-sdk/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/BerjisTech/kra-connect-node-sdk/discussions)
 
 ## Changelog
 
