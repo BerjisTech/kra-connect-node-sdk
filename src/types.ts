@@ -29,6 +29,15 @@ export enum ObligationStatus {
 /**
  * PIN verification result
  */
+export interface ResponseMetadata {
+  responseCode?: string;
+  responseDesc?: string;
+  status?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  requestId?: string;
+}
+
 export interface PinVerificationResult {
   /** The verified PIN number */
   pinNumber: string;
@@ -54,6 +63,9 @@ export interface PinVerificationResult {
   errorMessage?: string;
   /** Verification timestamp */
   verifiedAt: string;
+  metadata?: ResponseMetadata;
+  rawData?: Record<string, unknown>;
+  additionalData?: Record<string, unknown>;
 }
 
 /**
@@ -80,6 +92,9 @@ export interface TccVerificationResult {
   errorMessage?: string;
   /** Verification timestamp */
   verifiedAt: string;
+  metadata?: ResponseMetadata;
+  rawData?: Record<string, unknown>;
+  additionalData?: Record<string, unknown>;
 }
 
 /**
@@ -108,6 +123,9 @@ export interface EslipValidationResult {
   errorMessage?: string;
   /** Validation timestamp */
   validatedAt: string;
+  metadata?: ResponseMetadata;
+  rawData?: Record<string, unknown>;
+  additionalData?: Record<string, unknown>;
 }
 
 /**
@@ -116,10 +134,12 @@ export interface EslipValidationResult {
 export interface NilReturnRequest {
   /** Taxpayer's PIN */
   pinNumber: string;
-  /** Tax period in YYYYMM format */
-  period: string;
-  /** Obligation identifier */
-  obligationId: string;
+  /** Obligation code as defined by KRA */
+  obligationCode: number;
+  /** Tax period month (1-12) */
+  month: number;
+  /** Tax period year */
+  year: number;
 }
 
 /**
@@ -142,6 +162,9 @@ export interface NilReturnResult {
   acknowledgementReceipt?: string;
   /** Error message if filing failed */
   errorMessage?: string;
+  metadata?: ResponseMetadata;
+  rawData?: Record<string, unknown>;
+  additionalData?: Record<string, unknown>;
 }
 
 /**
@@ -196,6 +219,9 @@ export interface TaxpayerDetails {
   tccStatus?: string;
   /** Last update timestamp */
   lastUpdated: string;
+  metadata?: ResponseMetadata;
+  rawData?: Record<string, unknown>;
+  additionalData?: Record<string, unknown>;
 }
 
 /**
@@ -244,8 +270,14 @@ export interface RateLimitConfig {
  * Main SDK configuration
  */
 export interface KraConfig {
-  /** KRA API key (required) */
-  apiKey: string;
+  /** KRA API key (legacy auth). Prefer OAuth client credentials when possible. */
+  apiKey?: string;
+  /** OAuth client ID (Consumer Key) */
+  clientId?: string;
+  /** OAuth client secret (Consumer Secret) */
+  clientSecret?: string;
+  /** OAuth token endpoint */
+  tokenUrl?: string;
   /** Base URL for KRA API (default: https://api.kra.go.ke/gavaconnect/v1) */
   baseUrl?: string;
   /** Request timeout in milliseconds (default: 30000) */
