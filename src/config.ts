@@ -45,6 +45,18 @@ export const DEFAULT_RATE_LIMIT_CONFIG: Required<RateLimitConfig> = {
 /**
  * Configuration builder with validation
  */
+
+export type NormalizedKraConfig = {
+  apiKey: string;
+  baseUrl: string;
+  timeout: number;
+  verifySsl: boolean;
+  retryConfig: Required<RetryConfig>;
+  cacheConfig: Required<CacheConfig>;
+  rateLimitConfig: Required<RateLimitConfig>;
+  userAgent: string;
+};
+
 export class ConfigBuilder {
   /**
    * Create configuration from environment variables.
@@ -73,7 +85,7 @@ export class ConfigBuilder {
    * const config = ConfigBuilder.fromEnv({ timeout: 60000 });
    * ```
    */
-  static fromEnv(overrides?: Partial<KraConfig>): Required<KraConfig> {
+  static fromEnv(overrides?: Partial<KraConfig>): NormalizedKraConfig {
     // Get API key
     const apiKey = overrides?.apiKey || process.env.KRA_API_KEY;
     if (!apiKey) {
@@ -146,7 +158,7 @@ export class ConfigBuilder {
     // User agent
     const userAgent = overrides?.userAgent || 'kra-connect-node/0.1.0';
 
-    const config: Required<KraConfig> = {
+    const config: NormalizedKraConfig = {
       apiKey,
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
       timeout,
@@ -169,7 +181,7 @@ export class ConfigBuilder {
    * @param config - Configuration to validate
    * @throws Error if configuration is invalid
    */
-  private static validate(config: Required<KraConfig>): void {
+  private static validate(config: NormalizedKraConfig): void {
     if (!config.apiKey) {
       throw new Error('API key is required');
     }
@@ -223,7 +235,7 @@ export class ConfigBuilder {
    * console.log(headers['Authorization']); // Bearer api-key-here
    * ```
    */
-  static getHeaders(config: KraConfig): Record<string, string> {
+  static getHeaders(config: NormalizedKraConfig | KraConfig): Record<string, string> {
     return {
       Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
@@ -272,7 +284,7 @@ export class ConfigBuilder {
  * const client = new KraClient(config);
  * ```
  */
-export function createDefaultConfig(apiKey: string): Required<KraConfig> {
+export function createDefaultConfig(apiKey: string): NormalizedKraConfig {
   return {
     apiKey,
     baseUrl: 'https://api.kra.go.ke/gavaconnect/v1',
@@ -296,7 +308,7 @@ export function createDefaultConfig(apiKey: string): Required<KraConfig> {
  * const config = mergeConfig({ apiKey: 'test', timeout: 60000 });
  * ```
  */
-export function mergeConfig(userConfig: KraConfig): Required<KraConfig> {
+export function mergeConfig(userConfig: KraConfig): NormalizedKraConfig {
   const defaults = createDefaultConfig(userConfig.apiKey);
 
   return {

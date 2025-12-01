@@ -15,7 +15,7 @@ import {
   ApiError,
   RateLimitExceededError,
 } from './exceptions';
-import { ConfigBuilder } from './config';
+import { ConfigBuilder, NormalizedKraConfig } from './config';
 
 /**
  * HTTP client for making requests to KRA GavaConnect API.
@@ -31,7 +31,7 @@ import { ConfigBuilder } from './config';
  */
 export class HttpClient {
   private client: AxiosInstance;
-  private config: Required<KraConfig>;
+  private config: NormalizedKraConfig;
 
   /**
    * Initialize HTTP client.
@@ -44,7 +44,7 @@ export class HttpClient {
    * const client = new HttpClient(config);
    * ```
    */
-  constructor(config: Required<KraConfig>) {
+  constructor(config: NormalizedKraConfig) {
     this.config = config;
 
     // Create axios instance

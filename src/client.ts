@@ -18,7 +18,7 @@ import type {
 import { HttpClient } from './http-client';
 import { CacheManager } from './cache';
 import { TokenBucketRateLimiter } from './rate-limiter';
-import { ConfigBuilder, mergeConfig } from './config';
+import { mergeConfig, NormalizedKraConfig } from './config';
 import {
   validatePinFormat,
   validateTccFormat,
@@ -53,7 +53,7 @@ import { KraConnectError } from './exceptions';
  * ```
  */
 export class KraClient {
-  private readonly config: Required<KraConfig>;
+  private readonly config: NormalizedKraConfig;
   private readonly httpClient: HttpClient;
   private readonly cacheManager: CacheManager;
   private readonly rateLimiter: TokenBucketRateLimiter;

@@ -1,15 +1,16 @@
 {
   "name": "@kra-connect/node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Official Node.js/TypeScript SDK for KRA GavaConnect API - Tax compliance and verification for Kenya",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
