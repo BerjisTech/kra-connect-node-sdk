@@ -15,6 +15,7 @@ import type {
   NilReturnResult,
   TaxpayerDetails,
 } from './types';
+import { TaxpayerStatus, ObligationStatus } from './types';
 import { HttpClient } from './http-client';
 import { CacheManager } from './cache';
 import { TokenBucketRateLimiter } from './rate-limiter';
@@ -22,12 +23,10 @@ import { mergeConfig, NormalizedKraConfig } from './config';
 import {
   validatePinFormat,
   validateTccFormat,
-  validatePeriodFormat,
-  validateObligationId,
   validateEslipNumber,
   maskPin,
 } from './validators';
-import { KraConnectError } from './exceptions';
+import { KraConnectError, ValidationError } from './exceptions';
 
 /**
  * Main client for interacting with KRA GavaConnect API.
@@ -138,22 +137,29 @@ export class KraClient {
     await this.rateLimiter.acquire();
 
     try {
-      // Make API request
-      const responseData = await this.httpClient.post('/verify-pin', { pin: normalizedPin });
+      const envelope = await this.httpClient.post<Record<string, any>>('/checker/v1/pinbypin', {
+        KRAPIN: normalizedPin,
+      });
+      const data = envelope.data;
 
-      // Parse response into result
+      const statusValue =
+        (data.pinStatus || data.status || TaxpayerStatus.INACTIVE)?.toString().toLowerCase() as TaxpayerStatus;
+
       const result: PinVerificationResult = {
-        pinNumber: normalizedPin,
-        isValid: responseData.valid ?? false,
-        taxpayerName: responseData.taxpayer_name,
-        status: responseData.status,
-        registrationDate: responseData.registration_date,
-        businessType: responseData.business_type,
-        postalAddress: responseData.postal_address,
-        physicalAddress: responseData.physical_address,
-        email: responseData.email,
-        phoneNumber: responseData.phone_number,
+        pinNumber: data.kraPin || normalizedPin,
+        isValid: data.isValid ?? data.valid ?? false,
+        taxpayerName: data.taxpayerName || data.taxpayer_name,
+        status: statusValue,
+        registrationDate: data.registrationDate || data.registration_date,
+        businessType: data.taxpayerType || data.business_type,
+        postalAddress: data.postalAddress || data.postal_address,
+        physicalAddress: data.physicalAddress || data.physical_address,
+        email: data.emailAddress || data.email,
+        phoneNumber: data.phoneNumber || data.phone_number,
         verifiedAt: new Date().toISOString(),
+        metadata: envelope.metadata,
+        rawData: envelope.raw,
+        additionalData: data,
       };
 
       // Cache the result
@@ -175,6 +181,7 @@ export class KraClient {
    * This method checks if a TCC number is valid and currently active.
    *
    * @param tccNumber - The TCC number to verify
+   * @param kraPin - Taxpayer PIN associated with the TCC
    * @returns Promise resolving to TCC verification result
    * @throws InvalidTccFormatError if TCC format is invalid
    * @throws ApiError for API errors
@@ -190,14 +197,21 @@ export class KraClient {
    * }
    * ```
    */
-  async verifyTcc(tccNumber: string): Promise<TccVerificationResult> {
+  async verifyTcc(tccNumber: string, kraPin?: string): Promise<TccVerificationResult> {
     // Validate TCC format
     const normalizedTcc = validateTccFormat(tccNumber);
+    if (!kraPin) {
+      throw new ValidationError('pin', 'Taxpayer PIN is required to verify a TCC');
+    }
+    const normalizedPin = validatePinFormat(kraPin);
 
     console.log(`Verifying TCC: ${normalizedTcc}`);
 
     // Generate cache key
-    const cacheKey = this.cacheManager.generateKey('tcc', { tccNumber: normalizedTcc });
+    const cacheKey = this.cacheManager.generateKey('tcc', {
+      tccNumber: normalizedTcc,
+      pinNumber: normalizedPin,
+    });
 
     // Try to get from cache
     const cached = this.cacheManager.get<TccVerificationResult>(cacheKey);
@@ -210,20 +224,25 @@ export class KraClient {
     await this.rateLimiter.acquire();
 
     try {
-      // Make API request
-      const responseData = await this.httpClient.post('/verify-tcc', { tcc: normalizedTcc });
+      const envelope = await this.httpClient.post<Record<string, any>>('/v1/kra-tcc/validate', {
+        kraPIN: normalizedPin,
+        tccNumber: normalizedTcc,
+      });
+      const data = envelope.data;
 
-      // Parse response
       const result: TccVerificationResult = {
         tccNumber: normalizedTcc,
-        isValid: responseData.valid ?? false,
-        pinNumber: responseData.pin_number,
-        taxpayerName: responseData.taxpayer_name,
-        issueDate: responseData.issue_date,
-        expiryDate: responseData.expiry_date,
-        certificateType: responseData.certificate_type,
-        status: responseData.status,
+        isValid: data.isValid ?? data.valid ?? false,
+        pinNumber: data.kraPin || data.pin_number || normalizedPin,
+        taxpayerName: data.taxpayerName || data.taxpayer_name,
+        issueDate: data.issueDate || data.issue_date,
+        expiryDate: data.expiryDate || data.expiry_date,
+        certificateType: data.certificateType || data.certificate_type,
+        status: data.status || data.tccStatus,
         verifiedAt: new Date().toISOString(),
+        metadata: envelope.metadata,
+        rawData: envelope.raw,
+        additionalData: data,
       };
 
       // Cache the result
@@ -266,23 +285,25 @@ export class KraClient {
     await this.rateLimiter.acquire();
 
     try {
-      // Make API request
-      const responseData = await this.httpClient.post('/validate-eslip', {
-        slip_number: normalizedSlip,
+      const envelope = await this.httpClient.post<Record<string, any>>('/payment/checker/v1/eslip', {
+        EslipNumber: normalizedSlip,
       });
+      const data = envelope.data;
 
-      // Parse response
       const result: EslipValidationResult = {
-        slipNumber: normalizedSlip,
-        isValid: responseData.valid ?? false,
-        pinNumber: responseData.pin_number,
-        amount: responseData.amount,
-        paymentDate: responseData.payment_date,
-        paymentReference: responseData.payment_reference,
-        obligationType: responseData.obligation_type,
-        taxPeriod: responseData.tax_period,
-        status: responseData.status,
+        slipNumber: data.EslipNumber || normalizedSlip,
+        isValid: data.isValid ?? data.valid ?? false,
+        pinNumber: data.taxpayerPin || data.pin_number,
+        amount: data.amount,
+        paymentDate: data.paymentDate || data.payment_date,
+        paymentReference: data.paymentReference || data.payment_reference,
+        obligationType: data.obligationType || data.obligation_type,
+        taxPeriod: data.obligationPeriod || data.tax_period,
+        status: data.status,
         validatedAt: new Date().toISOString(),
+        metadata: envelope.metadata,
+        rawData: envelope.raw,
+        additionalData: data,
       };
 
       console.log(`E-slip validation completed: ${normalizedSlip}`);
@@ -320,31 +341,46 @@ export class KraClient {
   async fileNilReturn(request: NilReturnRequest): Promise<NilReturnResult> {
     // Validate inputs
     const normalizedPin = validatePinFormat(request.pinNumber);
-    const validatedPeriod = validatePeriodFormat(request.period);
-    const validatedObligationId = validateObligationId(request.obligationId);
+    if (request.obligationCode <= 0) {
+      throw new ValidationError('obligationCode', 'Obligation code must be a positive integer');
+    }
+    if (request.month < 1 || request.month > 12) {
+      throw new ValidationError('month', 'Month must be between 1 and 12');
+    }
+    if (request.year < 2000) {
+      throw new ValidationError('year', 'Year must be 2000 or later');
+    }
 
-    console.log(`Filing NIL return for PIN: ${maskPin(normalizedPin)}, period: ${validatedPeriod}`);
+    console.log(
+      `Filing NIL return for PIN: ${maskPin(normalizedPin)}, period: ${request.year}-${String(request.month).padStart(2, '0')}`
+    );
 
     // Acquire rate limit token
     await this.rateLimiter.acquire();
 
     try {
-      // Make API request
-      const responseData = await this.httpClient.post('/file-nil-return', {
-        pin: normalizedPin,
-        period: validatedPeriod,
-        obligation_id: validatedObligationId,
+      const envelope = await this.httpClient.post<Record<string, any>>('/dtd/return/v1/nil', {
+        TAXPAYERDETAILS: {
+          TaxpayerPIN: normalizedPin,
+          ObligationCode: request.obligationCode,
+          Month: request.month,
+          Year: request.year,
+        },
       });
+      const data = envelope.data;
 
-      // Parse response
       const result: NilReturnResult = {
         pinNumber: normalizedPin,
-        period: validatedPeriod,
-        obligationId: validatedObligationId,
-        submissionReference: responseData.submission_reference,
-        submissionDate: responseData.submission_date,
-        isSuccessful: responseData.success ?? false,
-        acknowledgementReceipt: responseData.acknowledgement_receipt,
+        period: `${request.year}${String(request.month).padStart(2, '0')}`,
+        obligationId: request.obligationCode.toString(),
+        submissionReference: data.referenceNumber || data.submission_reference,
+        submissionDate: data.filingDate || data.submission_date,
+        isSuccessful: data.success ?? true,
+        acknowledgementReceipt: data.acknowledgementNumber || data.acknowledgement_receipt,
+        errorMessage: data.errorMessage || data.error_message,
+        metadata: envelope.metadata,
+        rawData: envelope.raw,
+        additionalData: data,
       };
 
       console.log(`NIL return filing completed for PIN: ${maskPin(normalizedPin)}`);
@@ -395,28 +431,52 @@ export class KraClient {
     await this.rateLimiter.acquire();
 
     try {
-      // Make API request
-      const responseData = await this.httpClient.get(`/taxpayer-details/${normalizedPin}`);
+      const [profileEnvelope, obligationsEnvelope] = await Promise.all([
+        this.httpClient.post<Record<string, any>>('/checker/v1/pinbypin', {
+          KRAPIN: normalizedPin,
+        }),
+        this.httpClient.post<Record<string, any>>('/dtd/checker/v1/obligation', {
+          taxPayerPin: normalizedPin,
+        }),
+      ]);
 
-      // Parse response
+      const profile = profileEnvelope.data;
+      const obligations = (obligationsEnvelope.data?.obligations || []).map((ob: Record<string, any>) => ({
+        obligationId: ob.obligationId || ob.obligation_id,
+        obligationType: ob.obligationType || ob.obligation_type,
+        description: ob.description,
+        frequency: ob.frequency,
+        status: (ob.status || ObligationStatus.COMPLIANT) as ObligationStatus,
+        dueDate: ob.nextFilingDate || ob.due_date,
+        lastFiled: ob.lastFiled,
+      }));
+
+      const statusValue =
+        (profile.pinStatus || profile.status || TaxpayerStatus.ACTIVE)?.toString().toLowerCase() as TaxpayerStatus;
+
       const result: TaxpayerDetails = {
-        pinNumber: responseData.pin_number || normalizedPin,
-        taxpayerName: responseData.taxpayer_name,
-        businessName: responseData.business_name,
-        registrationDate: responseData.registration_date,
-        status: responseData.status,
-        businessType: responseData.business_type,
-        postalAddress: responseData.postal_address,
-        physicalAddress: responseData.physical_address,
-        email: responseData.email,
-        phoneNumber: responseData.phone_number,
-        taxObligations: responseData.tax_obligations || [],
-        complianceStatus: responseData.compliance_status,
-        tccStatus: responseData.tcc_status,
+        pinNumber: profile.kraPin || normalizedPin,
+        taxpayerName: profile.taxpayerName || profile.taxpayer_name,
+        businessName: profile.businessName || profile.business_name,
+        registrationDate: profile.registrationDate || profile.registration_date,
+        status: statusValue,
+        businessType: profile.taxpayerType || profile.business_type,
+        postalAddress: profile.postalAddress || profile.postal_address,
+        physicalAddress: profile.physicalAddress || profile.physical_address,
+        email: profile.emailAddress || profile.email,
+        phoneNumber: profile.phoneNumber || profile.phone_number,
+        taxObligations: obligations,
+        complianceStatus: profile.complianceStatus || profile.compliance_status,
+        tccStatus: profile.tccStatus || profile.tcc_status,
         lastUpdated: new Date().toISOString(),
+        metadata: profileEnvelope.metadata,
+        rawData: profileEnvelope.raw,
+        additionalData: {
+          profile: profileEnvelope.raw,
+          obligations: obligationsEnvelope.raw,
+        },
       };
 
-      // Cache the result with shorter TTL (30 minutes)
       this.cacheManager.set(cacheKey, result, 1800);
 
       console.log(`Taxpayer details retrieved for PIN: ${maskPin(normalizedPin)}`);

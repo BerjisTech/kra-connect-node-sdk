@@ -148,19 +148,20 @@ Verify a KRA PIN number.
 const result = await client.verifyPin('P051234567A');
 ```
 
-##### `verifyTcc(tccNumber: string): Promise<TccVerificationResult>`
+##### `verifyTcc(tccNumber: string, kraPin: string): Promise<TccVerificationResult>`
 
 Verify a Tax Compliance Certificate.
 
 **Parameters:**
 - `tccNumber` - The TCC number to verify
+- `kraPin` - Taxpayer PIN associated with the certificate
 
 **Returns:**
 - `Promise<TccVerificationResult>` - TCC verification result
 
 **Example:**
 ```typescript
-const result = await client.verifyTcc('TCC123456');
+const result = await client.verifyTcc('TCC123456', 'P051234567A');
 console.log(`Valid until: ${result.expiryDate}`);
 ```
 
@@ -180,8 +181,8 @@ File a NIL return for a taxpayer.
 
 **Parameters:**
 - `data.pinNumber` - Taxpayer's PIN
-- `data.period` - Tax period (YYYYMM format)
-- `data.obligationId` - Obligation identifier
+- `data.obligationCode` - Obligation code as defined by KRA
+- `data.month` / `data.year` - Tax period expressed as month/year
 
 **Returns:**
 - `Promise<NilReturnResult>` - Filing result
@@ -190,8 +191,9 @@ File a NIL return for a taxpayer.
 ```typescript
 const result = await client.fileNilReturn({
   pinNumber: 'P051234567A',
-  period: '202401',
-  obligationId: 'OBL123456',
+  obligationCode: 1,
+  month: 1,
+  year: 2024,
 });
 ```
 
@@ -211,7 +213,10 @@ Retrieve detailed taxpayer information.
 
 ```typescript
 interface KraConfig {
-  apiKey: string;
+  apiKey?: string;
+  clientId?: string;
+  clientSecret?: string;
+  tokenUrl?: string;
   baseUrl?: string;
   timeout?: number;
   retryConfig?: RetryConfig;

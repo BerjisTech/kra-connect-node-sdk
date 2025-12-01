@@ -8,7 +8,7 @@
 
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import axiosRetry from 'axios-retry';
-import type { KraConfig } from './types';
+import type { KraConfig, ResponseMetadata } from './types';
 import {
   ApiAuthenticationError,
   ApiTimeoutError,
@@ -29,9 +29,18 @@ import { ConfigBuilder, NormalizedKraConfig } from './config';
  * const response = await client.post('/verify-pin', { pin: 'P051234567A' });
  * ```
  */
+interface ApiEnvelope<T> {
+  data: T;
+  metadata: ResponseMetadata;
+  raw: Record<string, unknown>;
+}
+
 export class HttpClient {
   private client: AxiosInstance;
   private config: NormalizedKraConfig;
+  private accessToken?: string;
+  private tokenExpiry = 0;
+  private tokenRequest?: Promise<string>;
 
   /**
    * Initialize HTTP client.
@@ -110,11 +119,13 @@ export class HttpClient {
   private setupInterceptors(): void {
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
-        // Log request (in development)
+      async (config) => {
         if (process.env.NODE_ENV === 'development') {
           console.debug(`[HTTP] ${config.method?.toUpperCase()} ${config.url}`);
         }
+        const headers = config.headers ?? {};
+        headers.Authorization = `Bearer ${await this.getAccessToken()}`;
+        config.headers = headers;
         return config;
       },
       (error) => Promise.reject(error)
@@ -143,38 +154,11 @@ export class HttpClient {
    * @returns Parsed JSON response data
    * @throws ApiAuthenticationError, RateLimitExceededError, or ApiError
    */
-  private handleResponse<T = any>(response: AxiosResponse, endpoint: string): T {
-    // Handle successful responses
+  private handleResponse<T = any>(response: AxiosResponse, endpoint: string): ApiEnvelope<T> {
     if (response.status === 200 || response.status === 201) {
-      return response.data;
+      return this.normalizeResponse<T>(response, endpoint);
     }
-
-    // Handle authentication errors
-    if (response.status === 401) {
-      throw new ApiAuthenticationError('Invalid API key or authentication failed');
-    }
-
-    // Handle rate limiting
-    if (response.status === 429) {
-      const retryAfter = parseInt(response.headers['retry-after'] || '60', 10);
-      throw new RateLimitExceededError(retryAfter);
-    }
-
-    // Handle client errors
-    if (response.status >= 400 && response.status < 500) {
-      const errorMessage =
-        response.data?.message || response.data?.error || `Client error: ${response.status}`;
-      throw new ApiError(errorMessage, response.status, response.data);
-    }
-
-    // Handle server errors
-    if (response.status >= 500) {
-      const errorMessage = `Server error: ${response.status}`;
-      throw new ApiError(errorMessage, response.status, response.data);
-    }
-
-    // Unknown status code
-    throw new ApiError(`Unexpected status code: ${response.status}`, response.status);
+    return this.processErrorResponse(response, endpoint);
   }
 
   /**
@@ -195,12 +179,10 @@ export class HttpClient {
       throw new ApiError(`Network error: ${error.message}`);
     }
 
-    // Response error (already handled in handleResponse)
     if (error.response) {
-      return this.handleResponse(error.response, endpoint);
+      return this.processErrorResponse(error.response, endpoint);
     }
 
-    // Generic error
     throw new ApiError(`HTTP error: ${error.message}`);
   }
 
@@ -217,7 +199,7 @@ export class HttpClient {
    * const data = await client.get('/taxpayer-details', { pin: 'P051234567A' });
    * ```
    */
-  async get<T = any>(endpoint: string, params?: Record<string, any>): Promise<T> {
+  async get<T = any>(endpoint: string, params?: Record<string, any>): Promise<ApiEnvelope<T>> {
     try {
       const response = await this.client.get(endpoint, { params });
       return this.handleResponse<T>(response, endpoint);
@@ -239,7 +221,7 @@ export class HttpClient {
    * const result = await client.post('/verify-pin', { pin: 'P051234567A' });
    * ```
    */
-  async post<T = any>(endpoint: string, data?: Record<string, any>): Promise<T> {
+  async post<T = any>(endpoint: string, data?: Record<string, any>): Promise<ApiEnvelope<T>> {
     try {
       const response = await this.client.post(endpoint, data);
       return this.handleResponse<T>(response, endpoint);
@@ -255,7 +237,7 @@ export class HttpClient {
    * @param data - Optional request body
    * @returns Parsed JSON response
    */
-  async put<T = any>(endpoint: string, data?: Record<string, any>): Promise<T> {
+  async put<T = any>(endpoint: string, data?: Record<string, any>): Promise<ApiEnvelope<T>> {
     try {
       const response = await this.client.put(endpoint, data);
       return this.handleResponse<T>(response, endpoint);
@@ -270,7 +252,7 @@ export class HttpClient {
    * @param endpoint - API endpoint
    * @returns Parsed JSON response
    */
-  async delete<T = any>(endpoint: string): Promise<T> {
+  async delete<T = any>(endpoint: string): Promise<ApiEnvelope<T>> {
     try {
       const response = await this.client.delete(endpoint);
       return this.handleResponse<T>(response, endpoint);
@@ -286,7 +268,7 @@ export class HttpClient {
    * @param data - Optional request body
    * @returns Parsed JSON response
    */
-  async patch<T = any>(endpoint: string, data?: Record<string, any>): Promise<T> {
+  async patch<T = any>(endpoint: string, data?: Record<string, any>): Promise<ApiEnvelope<T>> {
     try {
       const response = await this.client.patch(endpoint, data);
       return this.handleResponse<T>(response, endpoint);
@@ -294,4 +276,131 @@ export class HttpClient {
       return this.handleError(error as AxiosError, endpoint);
     }
   }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.config.apiKey) {
+      return this.config.apiKey;
+    }
+
+    if (!this.config.clientId || !this.config.clientSecret) {
+      throw new ApiAuthenticationError('OAuth client credentials are not configured');
+    }
+
+    const now = Date.now();
+    if (this.accessToken && now < this.tokenExpiry - 30000) {
+      return this.accessToken;
+    }
+
+    if (!this.tokenRequest) {
+      this.tokenRequest = this.fetchAccessToken().finally(() => {
+        this.tokenRequest = undefined;
+      });
+    }
+
+    return this.tokenRequest;
+  }
+
+  private async fetchAccessToken(): Promise<string> {
+    const basic = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
+    const resp = await axios.get(this.config.tokenUrl, {
+      headers: {
+        Authorization: `Basic ${basic}`,
+        Accept: 'application/json',
+      },
+      timeout: this.config.timeout,
+    });
+
+    if (resp.status !== 200) {
+      throw new ApiAuthenticationError('Failed to obtain access token');
+    }
+
+    const token = resp.data?.access_token;
+    if (!token) {
+      throw new ApiAuthenticationError('Token response missing access_token');
+    }
+
+    const expiresIn = this.getExpiresInSeconds(resp.data?.expires_in);
+    this.accessToken = token;
+    this.tokenExpiry = Date.now() + expiresIn * 1000;
+    return token;
+  }
+
+  private getExpiresInSeconds(value: unknown): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = parseInt(value, 10);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+    return 3600;
+  }
+
+  private processErrorResponse(response: AxiosResponse, endpoint: string): never {
+    if (response.status === 401) {
+      throw new ApiAuthenticationError('Invalid credentials or authentication failed');
+    }
+    if (response.status === 429) {
+      const retryAfter = parseInt(response.headers['retry-after'] || '60', 10);
+      throw new RateLimitExceededError(retryAfter);
+    }
+
+    const message =
+      firstString(response.data, 'ErrorMessage', 'errorMessage', 'message', 'responseDesc') ||
+      `HTTP error: ${response.status}`;
+
+    throw new ApiError(message, response.status, response.data);
+  }
+
+  private normalizeResponse<T>(response: AxiosResponse, endpoint: string): ApiEnvelope<T> {
+    const payload = response.data ?? {};
+    const responseCode = firstString(payload, 'responseCode', 'ResponseCode');
+    const statusText = firstString(payload, 'status', 'Status');
+    const success = typeof payload.success === 'boolean' ? payload.success : undefined;
+    const errorCode = firstString(payload, 'ErrorCode', 'errorCode', 'code');
+
+    const isError =
+      (responseCode && responseCode !== '70000') ||
+      (statusText && statusText.toLowerCase().startsWith('error')) ||
+      errorCode ||
+      success === false;
+
+    if (isError) {
+      const message =
+        firstString(payload, 'ErrorMessage', 'errorMessage', 'message', 'responseDesc') ||
+        `API request failed for ${endpoint}`;
+      throw new ApiError(message, response.status, payload);
+    }
+
+    const data = payload.responseData ?? payload.data ?? payload;
+    const metadata: ResponseMetadata = {
+      responseCode: responseCode || '70000',
+      responseDesc: firstString(payload, 'responseDesc', 'ResponseDesc'),
+      status: statusText,
+      errorCode,
+      errorMessage: firstString(payload, 'ErrorMessage', 'errorMessage'),
+      requestId: firstString(payload, 'requestId', 'RequestId'),
+    };
+
+    return {
+      data: data as T,
+      metadata,
+      raw: payload,
+    };
+  }
+}
+
+function firstString(source: any, ...keys: string[]): string | undefined {
+  if (!source || typeof source !== 'object') {
+    return undefined;
+  }
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return undefined;
 }

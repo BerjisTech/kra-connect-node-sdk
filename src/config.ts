@@ -47,7 +47,10 @@ export const DEFAULT_RATE_LIMIT_CONFIG: Required<RateLimitConfig> = {
  */
 
 export type NormalizedKraConfig = {
-  apiKey: string;
+  apiKey?: string;
+  clientId?: string;
+  clientSecret?: string;
+  tokenUrl: string;
   baseUrl: string;
   timeout: number;
   verifySsl: boolean;
@@ -88,9 +91,11 @@ export class ConfigBuilder {
   static fromEnv(overrides?: Partial<KraConfig>): NormalizedKraConfig {
     // Get API key
     const apiKey = overrides?.apiKey || process.env.KRA_API_KEY;
-    if (!apiKey) {
+    const clientId = overrides?.clientId || process.env.KRA_CLIENT_ID;
+    const clientSecret = overrides?.clientSecret || process.env.KRA_CLIENT_SECRET;
+    if (!apiKey && !(clientId && clientSecret)) {
       throw new Error(
-        'API key is required. Set KRA_API_KEY environment variable or pass apiKey parameter.'
+        'Authentication is required. Provide KRA_API_KEY or set KRA_CLIENT_ID and KRA_CLIENT_SECRET.'
       );
     }
 
@@ -98,7 +103,12 @@ export class ConfigBuilder {
     const baseUrl =
       overrides?.baseUrl ||
       process.env.KRA_API_BASE_URL ||
-      'https://api.kra.go.ke/gavaconnect/v1';
+      'https://sbx.kra.go.ke';
+
+    const tokenUrl =
+      overrides?.tokenUrl ||
+      process.env.KRA_TOKEN_URL ||
+      'https://sbx.kra.go.ke/v1/token/generate?grant_type=client_credentials';
 
     // Get timeout
     const timeout = overrides?.timeout || parseInt(process.env.KRA_TIMEOUT || '30000', 10);
@@ -159,7 +169,10 @@ export class ConfigBuilder {
     const userAgent = overrides?.userAgent || 'kra-connect-node/0.1.0';
 
     const config: NormalizedKraConfig = {
-      apiKey,
+      apiKey: apiKey || undefined,
+      clientId: clientId || undefined,
+      clientSecret: clientSecret || undefined,
+      tokenUrl,
       baseUrl: baseUrl.replace(/\/$/, ''), // Remove trailing slash
       timeout,
       verifySsl,
@@ -182,8 +195,8 @@ export class ConfigBuilder {
    * @throws Error if configuration is invalid
    */
   private static validate(config: NormalizedKraConfig): void {
-    if (!config.apiKey) {
-      throw new Error('API key is required');
+    if (!config.apiKey && !(config.clientId && config.clientSecret)) {
+      throw new Error('Provide either an API key or OAuth client credentials');
     }
 
     if (config.timeout <= 0) {
@@ -237,7 +250,6 @@ export class ConfigBuilder {
    */
   static getHeaders(config: NormalizedKraConfig | KraConfig): Record<string, string> {
     return {
-      Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
       'User-Agent': config.userAgent || 'kra-connect-node/0.1.0',
@@ -284,10 +296,11 @@ export class ConfigBuilder {
  * const client = new KraClient(config);
  * ```
  */
-export function createDefaultConfig(apiKey: string): NormalizedKraConfig {
+export function createDefaultConfig(apiKey?: string): NormalizedKraConfig {
   return {
     apiKey,
-    baseUrl: 'https://api.kra.go.ke/gavaconnect/v1',
+    baseUrl: 'https://sbx.kra.go.ke',
+    tokenUrl: 'https://sbx.kra.go.ke/v1/token/generate?grant_type=client_credentials',
     timeout: 30000,
     verifySsl: true,
     retryConfig: DEFAULT_RETRY_CONFIG,
@@ -314,6 +327,9 @@ export function mergeConfig(userConfig: KraConfig): NormalizedKraConfig {
   return {
     ...defaults,
     ...userConfig,
+    tokenUrl: userConfig.tokenUrl || defaults.tokenUrl,
+    clientId: userConfig.clientId || defaults.clientId,
+    clientSecret: userConfig.clientSecret || defaults.clientSecret,
     retryConfig: { ...defaults.retryConfig, ...userConfig.retryConfig },
     cacheConfig: { ...defaults.cacheConfig, ...userConfig.cacheConfig },
     rateLimitConfig: { ...defaults.rateLimitConfig, ...userConfig.rateLimitConfig },
